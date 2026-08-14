@@ -1,0 +1,110 @@
+{
+  "theme": "dark",
+  "typography": {
+    "primary_font": "IBM Plex Sans",
+    "heading_font": "Chivo",
+    "monospace_font": "JetBrains Mono",
+    "rules": {
+      "headings": "Uppercase, tracking-widest for section titles. Chivo medium weight.",
+      "data_readouts": "JetBrains Mono exclusively for coordinates, dates, scores, areas, and IDs.",
+      "body": "IBM Plex Sans text-sm to text-xs for dense information.",
+      "labels": "Tiny (text-[10px]), uppercase, tracking-wider, text-slate-400 for structural labels."
+    }
+  },
+  "colors": {
+    "background": {
+      "app": "#050505",
+      "panels": "#09090B",
+      "surface": "#121212",
+      "surface_hover": "#1E1E24"
+    },
+    "tactical_accent": {
+      "primary": "#22D3EE",
+      "primary_hover": "#06B6D4",
+      "primary_muted": "rgba(34, 211, 238, 0.15)",
+      "amber": "#FFB020"
+    },
+    "status": {
+      "high_confidence": "#FFB020",
+      "threat_critical": "#FF3D00",
+      "success": "#00E676"
+    },
+    "borders": {
+      "default": "rgba(255, 255, 255, 0.1)",
+      "focus": "#22D3EE"
+    },
+    "text": {
+      "primary": "#F8FAFC",
+      "secondary": "#94A3B8",
+      "muted": "#475569"
+    }
+  },
+  "layouts": {
+    "overall": "Map is absolute full-screen hero element. UI panels are collapsible absolute overlays over the map.",
+    "left_panel": "w-80 or w-96, docked left. Contains AOI list, search form, layer toggles.",
+    "right_panel": "w-80 or w-96, docked right. Contains observations, change events, dashboard stats, event detail.",
+    "bottom_timeline": "h-24 docked at bottom. Play/pause controls, observation markers distributed by month.",
+    "spacing": "Ultra-dense. p-2 to p-4 maximum inner padding. Use 1px borders to separate rows instead of whitespace.",
+    "borders": "Square corners (rounded-none or max rounded-sm). Grid borders (border-collapse) for tabular data."
+  },
+  "components": {
+    "buttons": "Flat, 1px solid border, no radius, subtle inner glow on hover. Tactical accent color for primary actions.",
+    "panels": "Solid bg-black/95 or bg-[#09090B]/95. NO glassmorphism blurring (backdrop-blur) as it distorts underlying map data. Pure solid dark surfaces.",
+    "inputs": "Flat, border-b only or sharp 1px border. Focus state turns border to tactical cyan.",
+    "job_progress": "Minimal step tracker with monospace status labels (e.g., [SEARCHING], [DOWNLOADING], [DETECTING]).",
+    "change_event_card": "Thumbnail on left, dense monospace stats on right (Area, Score, Conf). Border-left accent color based on confidence level."
+  },
+  "motion": {
+    "panels": "Swift, mechanical sliding transitions (150ms ease-out).",
+    "data_updates": "Flicker/glitch effect for new incoming intelligence data.",
+    "hover": "Instant highlight, no soft fading. Sharp and precise."
+  },
+  "visual_enhancers": {
+    "scanlines": "Subtle repeating-linear-gradient scanline overlay on empty states or loaders.",
+    "crosshairs": "Use custom crosshair cursor over the map.",
+    "corner_brackets": "Use L-shaped SVG brackets for framing important images (before/after thumbnails)."
+  },
+  "media": {
+    "map": "OpenLayers with a dark-themed base map underneath satellite imagery.",
+    "image_urls": {
+      "background_map": {
+        "url": "https://images.unsplash.com/photo-1759210394481-61b92cdac046?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwzfHxkaWdpdGFsJTIwbWFwJTIwZGFyayUyMGdyZWVufGVufDB8fHx8MTc4NjY4NzUzNXww&ixlib=rb-4.1.0&q=85",
+        "description": "Dark abstract map texture for placeholder map loading state",
+        "category": "placeholder_map"
+      },
+      "satellite_demo": {
+        "url": "https://images.unsplash.com/photo-1744968777188-3e1b2ef23339?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwyfHxkaWdpdGFsJTIwbWFwJTIwZGFyayUyMGdyZWVufGVufDB8fHx8MTc4NjY4NzUzNXww&ixlib=rb-4.1.0&q=85",
+        "description": "Aerial satellite view for before/after demo panel",
+        "category": "demo_imagery"
+      },
+      "satellite_night": {
+        "url": "https://images.unsplash.com/photo-1634176866089-b633f4aec882?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzF8MHwxfHNlYXJjaHwyfHxzYXRlbGxpdGUlMjBpbWFnZXJ5JTIwZWFydGh8ZW58MHx8fHwxNzg2Njg3NTM1fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Earth at night for global context",
+        "category": "global_context"
+      }
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure APCA contrast standards. Avoid gray-on-gray for readable text.",
+    "focus": "High contrast cyan outlines for keyboard navigation.",
+    "data_testid": "MANDATORY on all interactive and key informational elements."
+  },
+  "instructions_to_main_agent": [
+    "Build a React app using Shadcn UI (customize components to remove borders radius and soften shadows).",
+    "Make the OpenLayers map cover the entire viewport absolute inset-0.",
+    "Layer the left panel, right panel, and bottom timeline as fixed/absolute overlays above the map (z-index 10).",
+    "Use solid dark colors for overlays (bg-zinc-950). Do not use backdrop-blur for overlays to prevent map distortion.",
+    "For tabular data and cards, use JetBrains Mono to mimic a terminal or tactical HUD.",
+    "Render a prominent DEMO DATA badge at the top center if CDSE credentials aren't active.",
+    "Add 'data-testid' to every actionable element.",
+    "Implement the UI exclusively with .js/.jsx, no TypeScript.",
+    "DO NOT use generic Inter/Roboto fonts for headings. Use Chivo."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "DO NOT use generic centered layouts. Use absolute positioning and dense panel architecture.",
+    "Use 1px borders and sharp edges. Remove default rounding from Shadcn components.",
+    "Never use pure transparent backgrounds for text containers over maps.",
+    "Do not use transition-all. Be specific.",
+    "Never center-align the main App container (.App { text-align: center; } is FORBIDDEN)."
+  ]
+}
