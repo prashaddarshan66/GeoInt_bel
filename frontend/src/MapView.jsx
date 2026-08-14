@@ -3,15 +3,15 @@ import "ol/ol.css";
 import { Map, View } from "ol";
 import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
+import ImageLayer from "ol/layer/Image";
 import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
+import Static from "ol/source/ImageStatic";
 import { Draw, Modify } from "ol/interaction";
 import GeoJSON from "ol/format/GeoJSON";
 import { Style, Stroke, Fill, Circle as CircleStyle } from "ol/style";
 import { fromLonLat, toLonLat } from "ol/proj";
 import { getArea } from "ol/sphere";
-import Feature from "ol/Feature";
-import Polygon from "ol/geom/Polygon";
 
 const styleAoi = new Style({
   stroke: new Stroke({ color: "#22d3ee", width: 2, lineDash: [6, 4] }),
@@ -38,6 +38,7 @@ export default function MapView({
   drawEnabled,
   onFeatureClick,
   focusBbox,
+  imageryLayer, // { url, bbox: [minx,miny,maxx,maxy], opacity }
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -45,6 +46,7 @@ export default function MapView({
   const drawSourceRef = useRef(new VectorSource());
   const changesSourceRef = useRef(new VectorSource());
   const drawInteractionRef = useRef(null);
+  const imageryLayerRef = useRef(null);
 
   // Init map once
   useEffect(() => {
@@ -158,6 +160,34 @@ export default function MapView({
       maxZoom: 15,
     });
   }, [focusBbox]);
+
+  // Imagery layer (satellite preview PNG)
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    if (imageryLayerRef.current) {
+      m.removeLayer(imageryLayerRef.current);
+      imageryLayerRef.current = null;
+    }
+    if (imageryLayer && imageryLayer.url && imageryLayer.bbox) {
+      const [minx, miny, maxx, maxy] = imageryLayer.bbox;
+      const extent = [
+        ...fromLonLat([minx, miny]),
+        ...fromLonLat([maxx, maxy]),
+      ];
+      const layer = new ImageLayer({
+        source: new Static({
+          url: imageryLayer.url,
+          imageExtent: extent,
+          crossOrigin: "anonymous",
+        }),
+        opacity: imageryLayer.opacity ?? 0.85,
+      });
+      // Insert above base (index 0) but below vector layers
+      m.getLayers().insertAt(1, layer);
+      imageryLayerRef.current = layer;
+    }
+  }, [imageryLayer]);
 
   return (
     <div

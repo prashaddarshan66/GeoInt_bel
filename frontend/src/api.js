@@ -13,6 +13,7 @@ export const api = {
   searchImagery: (payload) => client.post("/imagery/search", payload).then((r) => r.data),
   listObservations: (aoiId) => client.get(`/aois/${aoiId}/observations`).then((r) => r.data),
   runChangeDetection: (payload) => client.post("/change-detection", payload).then((r) => r.data),
+  runTimeseries: (payload) => client.post("/change-detection/timeseries", payload).then((r) => r.data),
   getJob: (jobId) => client.get(`/jobs/${jobId}`).then((r) => r.data),
   listChanges: (aoiId, params = {}) =>
     client.get(`/aois/${aoiId}/changes`, { params }).then((r) => r.data),

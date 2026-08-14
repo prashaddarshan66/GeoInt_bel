@@ -6,9 +6,10 @@ import { toast, Toaster } from "sonner";
 import {
   Crosshair, Search, Trash2, PlayCircle, Radar, Sun,
   Activity, Target, X, ChevronsDown, ChevronsUp, Zap, AlertTriangle, FileDown,
+  Layers, EyeOff, History,
 } from "lucide-react";
 
-const SATELLITE_DEMO = "https://images.unsplash.com/photo-1744968777188-3e1b2ef23339?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjh8MHwxfHNlYXJjaHwyfHxkaWdpdGFsJTIwbWFwJTIwZGFyayUyMGdyZWVufGVufDB8fHx8MTc4NjY4NzUzNXww&ixlib=rb-4.1.0&q=85";
+const SATELLITE_DEMO = "";
 
 function formatArea(m2) {
   if (m2 == null) return "—";
@@ -62,6 +63,7 @@ export default function App() {
   const [minConfidence, setMinConfidence] = useState(0);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [focusBbox, setFocusBbox] = useState(null);
+  const [mapLayer, setMapLayer] = useState("after");
   const pollRef = useRef(null);
 
   // Initial load
@@ -188,6 +190,25 @@ export default function App() {
     }
   };
 
+  const runTimeseries = async () => {
+    if (!selectedAoi) return toast.error("Select an AOI first");
+    const provs = [];
+    if (providers.s2) provs.push("sentinel-2-l2a");
+    if (providers.s1) provs.push("sentinel-1-grd");
+    if (!provs.length) return toast.error("Select at least one provider");
+    try {
+      const job = await api.runTimeseries({
+        aoi_id: selectedAoi.id,
+        use_sar: providers.s1,
+        providers: provs,
+      });
+      setActiveJob(job);
+      toast.info(`Time-series detection queued (${provs.length} provider${provs.length > 1 ? "s" : ""})`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail ?? "Timeseries submit failed");
+    }
+  };
+
   const deleteAoi = async (id) => {
     if (!window.confirm("Delete this AOI and all its data?")) return;
     await api.deleteAoi(id);
@@ -205,6 +226,18 @@ export default function App() {
       }
     : null;
 
+  // Build imagery layer descriptor for the map
+  const activeObs =
+    mapLayer === "after" ? afterObs :
+    mapLayer === "before" ? beforeObs : null;
+  const imageryLayer = (activeObs && selectedAoi)
+    ? {
+        url: `${API}/observations/${encodeURIComponent(activeObs.observation_id)}/preview`,
+        bbox: selectedAoi.bbox,
+        opacity: 0.9,
+      }
+    : null;
+
   return (
     <div className="App">
       <Toaster position="top-right" theme="dark" />
@@ -215,7 +248,36 @@ export default function App() {
         onAoiDrawn={handleAoiDrawn}
         onFeatureClick={setSelectedChange}
         focusBbox={focusBbox}
+        imageryLayer={imageryLayer}
       />
+
+      {/* IMAGERY LAYER TOGGLE */}
+      {selectedAoi && (beforeObs || afterObs) && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 panel flex items-center gap-1 px-2 py-1" data-testid="imagery-layer-toggle">
+          <Layers size={11} className="text-[color:var(--accent)]" />
+          <span className="label-mini mr-1">IMAGERY</span>
+          <button
+            data-testid="layer-before"
+            className={`tactical-btn ${mapLayer === "before" ? "primary" : ""}`}
+            style={{ padding: "3px 8px", fontSize: 10 }}
+            disabled={!beforeObs}
+            onClick={() => setMapLayer("before")}
+          >Before</button>
+          <button
+            data-testid="layer-after"
+            className={`tactical-btn ${mapLayer === "after" ? "primary" : ""}`}
+            style={{ padding: "3px 8px", fontSize: 10 }}
+            disabled={!afterObs}
+            onClick={() => setMapLayer("after")}
+          >After</button>
+          <button
+            data-testid="layer-off"
+            className={`tactical-btn ${mapLayer === "off" ? "primary" : ""}`}
+            style={{ padding: "3px 8px", fontSize: 10 }}
+            onClick={() => setMapLayer("off")}
+          ><EyeOff size={10} className="inline" /> Off</button>
+        </div>
+      )}
 
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 py-2 bg-black/80 border-b" style={{ borderColor: "var(--border)" }}>
@@ -456,6 +518,15 @@ export default function App() {
               >
                 <PlayCircle size={11} className="inline mr-1" /> Run Change Detection
               </button>
+              <button
+                data-testid="run-timeseries-btn"
+                className="tactical-btn w-full mt-1"
+                disabled={activeJob?.status === "RUNNING" || observations.length < 2}
+                onClick={runTimeseries}
+                title="Run change detection across every consecutive pair to compute real persistence"
+              >
+                <History size={11} className="inline mr-1" /> Run Time-Series ({Math.max(0, observations.filter((o) => (providers.s2 && o.collection === "sentinel-2-l2a") || (providers.s1 && o.collection === "sentinel-1-grd")).length - 1)} pairs)
+              </button>
             </div>
           )}
 
@@ -595,15 +666,15 @@ function ChangeDetail({ change, onClose }) {
       </div>
       <div className="grid grid-cols-3 gap-1 mb-2">
         <CornerFrame testId="cf-before">
-          <img src={SATELLITE_DEMO} alt="before" className="w-full aspect-square object-cover" />
+          <img src={`${API}/changes/${change.id}/crop/before`} alt="before" className="w-full aspect-square object-cover" onError={(e) => { e.currentTarget.style.opacity = 0.3; }} />
           <div className="label-mini text-center mt-1">BEFORE</div>
         </CornerFrame>
         <CornerFrame testId="cf-after">
-          <img src={SATELLITE_DEMO} alt="after" className="w-full aspect-square object-cover" style={{ filter: "hue-rotate(60deg) contrast(1.15)" }} />
+          <img src={`${API}/changes/${change.id}/crop/after`} alt="after" className="w-full aspect-square object-cover" onError={(e) => { e.currentTarget.style.opacity = 0.3; }} />
           <div className="label-mini text-center mt-1">AFTER</div>
         </CornerFrame>
         <CornerFrame testId="cf-diff">
-          <div className="w-full aspect-square" style={{ background: `linear-gradient(135deg, var(--amber), var(--critical))`, opacity: 0.8 }} />
+          <img src={`${API}/changes/${change.id}/crop/diff`} alt="difference" className="w-full aspect-square object-cover" onError={(e) => { e.currentTarget.style.opacity = 0.3; }} />
           <div className="label-mini text-center mt-1">DIFF</div>
         </CornerFrame>
       </div>

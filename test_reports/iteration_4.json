@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 4 (dedupe + preview upscaling) validated end-to-end. Backend: 5/5 pytest passed. (1) Rome-Live timeseries now dedupes by acquisition date — pair_details shows unique dates (T33TTG_20240603 → T33TTG_20240608 → T33TTG_20240618 → T32TQM_20240628 → T33TTG_20240708); total_pairs=4 (post-cap), s2_pairs=11 (12 unique dates after dedupe vs 24 raw obs = correct); tracks=8 (was 0 in iter 3). (2) Observation preview PNG opened via PIL: dims >=256×256 confirmed. (3) Change crop PNGs (before/after/diff) opened via PIL: all >=256×256 confirmed on both CRL small-polygon events (previously 11×10) and new Rome-Live timeseries events. (4) Single-pair /api/v1/change-detection contract unchanged (200/400/422 as expected; existing 0.75 persistence events intact). Frontend: Rome-Live → set-before[0] + set-after[3] → imagery-layer-toggle visible → layer-after loads crisp Sentinel-2 RGB overlay + 8 change polygon outlines drawn over Rome; dashboard shows CHANGES=8, LARGEST=Infrastructure 3.67 ha. Persistence variance note: all 8 tracks currently have persistence=0.25 because polygons only appeared in 1 of 4 pairs (pair 3: T32TQM_20240628→T33TTG_20240708 produced 8 polygons; pairs 0/1/2 produced 0). This is legitimate real-data behaviour — persistence is computed correctly, NOT hardcoded 0.75. The request expected 'some 0.25, some 0.5, some 1.0' which is data-dependent and cannot be forced.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/v1/change-detection/timeseries", "issue": "Rome-Live tracks now >0 (=8) after dedupe, but all 8 have persistence=0.25 because 3 of 4 pairs still produced 0 polygons (thresholds too high or actual scene change too subtle across consecutive 5-10 day intervals). Not a code bug — persistence math is correct (obs_in_pairs/total_pairs). If the product needs multi-pair recurrence to demonstrate 0.5/1.0 values, consider (a) lowering optical threshold slightly for demonstration AOIs, (b) increasing MAX_PAIRS beyond 4 (currently caps at 4), or (c) selecting an AOI with more construction/change activity."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [
+    "(Optional) To exercise persistence>0.25 the timeseries needs actual multi-pair recurring change. Consider lowering pipelines.detect_optical_changes threshold or picking a busier AOI. Current behaviour is correct.",
+    "(Optional) Cap MAX_PAIRS=4 in orchestrator.run_timeseries_detection means s2_pairs=11 reported in diag but only 4 processed — consider raising cap or documenting the truncation in output."
+  ],
+  "critical_code_review_comments": [
+    "orchestrator.run_timeseries_detection: diag['s2_pairs']=11 is computed BEFORE the MAX_PAIRS cap is applied, but total_pairs (used for persistence denominator) is computed AFTER — mildly misleading; consider aligning by reporting both processed_pairs and available_pairs.",
+    "previews._resize_min uses Image.BICUBIC which is fine, but for very small source (<16px) BICUBIC on 4x-8x upscale produces blurry output; consider LANCZOS for higher quality thumbnails or an initial NEAREST 2x expand.",
+    "polygon_bbox_padded still only reads coordinates[0] — MultiPolygon geometries will IndexError (pre-existing issue from iter 3, not addressed in iter 4).",
+    "server change_crop endpoint has no cache header; every UI mount fires 3× fresh crop renders. Consider Cache-Control: max-age or ETag on stable event/tif combos.",
+    "orchestrator._dedupe: helper argument 'key' is unused; can be removed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 pytest passed; dedupe + 256px upscale both verified via PIL)",
+    "frontend": "100% (Rome-Live imagery overlay renders crisp with 8 change polygons drawn; imagery-layer-toggle + layer-after end-to-end verified)"
+  },
+  "test_credentials": "N/A (no auth); CDSE creds in backend/.env",
+  "seed_data_creation": "Reused the fresh timeseries job triggered on Rome-Live (job_id=daaba5b5-a8d2-432a-a46b-e73cec737486, COMPLETED, tracks=8, total_pairs=4). 8 new change_events materialized on Rome-Live with metrics.observed_in_pairs=1 / total_pairs=4 / persistence=0.25. No new AOIs created. No further /change-detection/timeseries POSTs beyond what backend already had (test reuses COMPLETED job to conserve CDSE quota).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iter 4 fixes verified. Rome-Live has 8 timeseries change_events all with persistence=0.25 (1/4 pairs) — this is correct because 3 of 4 dedupe'd optical pairs produced 0 polygons. Cached TIFs live under /app/data/raw/<aoi_id>/. Backend restart NOT required; hot reload picked up orchestrator.py + previews.py changes. If retesting persistence variance is needed, either (a) increase MAX_PAIRS (currently 4) and reset the timeseries job, or (b) pick an AOI over an active construction site. Crop endpoint now enforces 256×256 minimum via previews._resize_min BICUBIC — validated on both CRL small-polygon events (11×10 → 256×256) and Rome-Live events.",
+  "rca of the issue": "Iter 3's dedupe gap and thumbnail-pixelation are fully fixed by orchestrator._dedupe (dedupe by observation_datetime[:10], keep lowest cloud%) and previews._resize_min (BICUBIC to min 256×256). Reproduced iter 3 issue by inspecting previous job pair_details (had same-day tile pairs like T32TQM_20240603 vs T33TTG_20240603); iter 4 pair_details now has strictly monotonic acquisition dates. Remaining persistence=0.25 uniformity is a data limitation, not a code bug."
+}

@@ -250,8 +250,8 @@ def detect_sar_changes(
 
 
 # ============================ FUSION & CLASSIFY =============================
-def _polygon_iou(a: dict, b: dict) -> float:
-    """Approximate IoU via shapely if available; else bbox IoU."""
+def polygon_iou(a: dict, b: dict) -> float:
+    """Approximate IoU via shapely if available; else 0."""
     try:
         from shapely.geometry import shape
         ga = shape(a["geometry"])
@@ -265,11 +265,10 @@ def _polygon_iou(a: dict, b: dict) -> float:
         return 0.0
 
 
-def _polygon_area_m2(geom: dict) -> float:
+def polygon_area_m2(geom: dict) -> float:
     try:
         from shapely.geometry import shape
         g = shape(geom)
-        # Approx: convert to local metric via equirectangular
         ring = list(g.exterior.coords)
     except Exception:
         ring = geom["coordinates"][0]
@@ -286,8 +285,7 @@ def _polygon_area_m2(geom: dict) -> float:
     return abs(area) / 2.0
 
 
-def _classify(magnitude: float, sar_agree: bool, area_m2: float) -> str:
-    """Heuristic classification. Not verified ground truth."""
+def classify(magnitude: float, sar_agree: bool, area_m2: float) -> str:
     if sar_agree and area_m2 > 2000 and magnitude > 3.0:
         return "Construction"
     if sar_agree and magnitude > 3.0:
@@ -301,7 +299,7 @@ def _classify(magnitude: float, sar_agree: bool, area_m2: float) -> str:
     return "Other"
 
 
-def _confidence(
+def confidence(
     magnitude_z: float,
     valid_pixel_frac: float,
     persistence: float,
@@ -315,6 +313,13 @@ def _confidence(
         + 0.15 * (1.0 if multi_sensor else 0.0)
     )
     return round(min(0.99, max(0.05, conf)), 3)
+
+
+# Backwards-compat aliases (internal helpers used in fuse_and_finalize below)
+_polygon_iou = polygon_iou
+_polygon_area_m2 = polygon_area_m2
+_classify = classify
+_confidence = confidence
 
 
 def fuse_and_finalize(

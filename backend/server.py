@@ -19,13 +19,17 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 from fastapi import FastAPI, APIRouter, HTTPException, BackgroundTasks, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 
 from cdse import cdse_client
-from orchestrator import run_change_detection
+from orchestrator import run_change_detection, run_timeseries_detection
+from previews import (
+    obs_tif, render_observation_png, render_difference_png,
+    polygon_bbox_padded,
+)
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -104,6 +108,12 @@ class ChangeDetectionRequest(BaseModel):
     before_observation_id: str
     after_observation_id: str
     use_sar: bool = True
+
+
+class TimeseriesRequest(BaseModel):
+    aoi_id: str
+    use_sar: bool = True
+    providers: list[str] = Field(default_factory=lambda: ["sentinel-2-l2a"])
 
 
 @api.get("/status")
@@ -236,6 +246,82 @@ async def list_observations(aoi_id: str) -> list[dict]:
     return await db.observations.find({"aoi_id": aoi_id}, {"_id": 0}).sort("observation_datetime", 1).to_list(2000)
 
 
+async def _ensure_obs_tif(aoi_id: str, obs: dict) -> Path:
+    """Return path to cached TIF, fetching via Process API if missing."""
+    from pipelines import raw_dir
+    tif = raw_dir(aoi_id, obs["observation_id"]) / f"{obs['collection']}.tif"
+    if tif.exists() and tif.stat().st_size > 1000:
+        return tif
+    if not cdse_client.is_configured:
+        raise HTTPException(404, "Imagery not cached and no CDSE credentials configured")
+    aoi = await db.aois.find_one({"id": aoi_id}, {"_id": 0})
+    if not aoi:
+        raise HTTPException(404, "AOI not found")
+    try:
+        data = await cdse_client.fetch_geotiff(
+            collection=obs["collection"], bbox=aoi["bbox"],
+            acquisition_datetime=obs["observation_datetime"],
+        )
+        tif.write_bytes(data)
+    except Exception as exc:
+        raise HTTPException(502, f"CDSE fetch failed: {exc}")
+    return tif
+
+
+@api.get("/observations/{obs_id}/preview")
+async def observation_preview(obs_id: str) -> Response:
+    obs = await db.observations.find_one({"observation_id": obs_id}, {"_id": 0})
+    if not obs:
+        raise HTTPException(404, "Observation not found")
+    tif = await _ensure_obs_tif(obs["aoi_id"], obs)
+    aoi = await db.aois.find_one({"id": obs["aoi_id"]}, {"_id": 0})
+    bbox = tuple(aoi["bbox"]) if aoi else None
+    try:
+        png = render_observation_png(tif, obs["collection"], bbox_4326=bbox)
+    except Exception as exc:
+        logger.exception("Preview render failed")
+        raise HTTPException(500, f"Render failed: {exc}")
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@api.get("/changes/{change_id}/crop/{kind}")
+async def change_crop(change_id: str, kind: str) -> Response:
+    if kind not in {"before", "after", "diff"}:
+        raise HTTPException(400, "kind must be before, after, or diff")
+    ev = await db.change_events.find_one({"id": change_id}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Change event not found")
+    aoi_id = ev["aoi_id"]
+
+    # find matching observation docs by product_id under this AOI
+    before_obs = await db.observations.find_one(
+        {"aoi_id": aoi_id, "product_id": ev["before_imagery_id"]}, {"_id": 0}
+    )
+    after_obs = await db.observations.find_one(
+        {"aoi_id": aoi_id, "product_id": ev["after_imagery_id"]}, {"_id": 0}
+    )
+    if not before_obs or not after_obs:
+        raise HTTPException(404, "Source observations not found")
+
+    b_tif = await _ensure_obs_tif(aoi_id, before_obs)
+    a_tif = await _ensure_obs_tif(aoi_id, after_obs)
+    poly_bbox = polygon_bbox_padded(ev["geometry"], pad_frac=0.4)
+    coll = before_obs["collection"]
+    try:
+        if kind == "before":
+            png = render_observation_png(b_tif, coll, bbox_4326=poly_bbox)
+        elif kind == "after":
+            png = render_observation_png(a_tif, coll, bbox_4326=poly_bbox)
+        else:
+            png = render_difference_png(b_tif, a_tif, coll, bbox_4326=poly_bbox)
+    except Exception as exc:
+        logger.exception("Crop render failed")
+        raise HTTPException(500, f"Render failed: {exc}")
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 async def _run_change_detection_job(job_id: str, aoi_id: str, before_id: str, after_id: str, use_sar: bool) -> None:
     try:
         aoi = await db.aois.find_one({"id": aoi_id}, {"_id": 0})
@@ -295,6 +381,63 @@ async def submit_change_detection(req: ChangeDetectionRequest, background: Backg
     await db.jobs.insert_one(dict(job))
     background.add_task(_run_change_detection_job, job_id, req.aoi_id,
                         req.before_observation_id, req.after_observation_id, req.use_sar)
+    job.pop("_id", None)
+    return job
+
+
+async def _run_timeseries_job(job_id: str, aoi_id: str, use_sar: bool, providers: list[str]) -> None:
+    try:
+        aoi = await db.aois.find_one({"id": aoi_id}, {"_id": 0})
+        if not aoi:
+            raise RuntimeError("AOI not found")
+        # Pick observations for the selected providers, sorted by date
+        obs_docs = await db.observations.find(
+            {"aoi_id": aoi_id, "collection": {"$in": providers}}, {"_id": 0}
+        ).sort("observation_datetime", 1).to_list(2000)
+        if len(obs_docs) < 2:
+            raise RuntimeError("Need at least 2 observations for timeseries")
+
+        async def progress_cb(stage: str, p: float) -> None:
+            await db.jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {"stage": stage, "progress": p, "status": "RUNNING"}},
+            )
+
+        events, diag = await run_timeseries_detection(
+            aoi_id, aoi["bbox"], obs_docs, use_sar, progress_cb=progress_cb
+        )
+        for ev in events:
+            ev["id"] = str(uuid.uuid4())
+            await db.change_events.insert_one(dict(ev))
+
+        await db.jobs.update_one(
+            {"job_id": job_id},
+            {"$set": {"status": "COMPLETED", "stage": "COMPLETED", "progress": 1.0,
+                      "completed_at": now_iso(),
+                      "output": {"change_event_count": len(events), "diagnostics": diag}}},
+        )
+    except Exception as exc:
+        logger.exception("Timeseries job failed")
+        await db.jobs.update_one(
+            {"job_id": job_id},
+            {"$set": {"status": "FAILED", "error_message": str(exc), "completed_at": now_iso()}},
+        )
+
+
+@api.post("/change-detection/timeseries")
+async def submit_timeseries(req: TimeseriesRequest, background: BackgroundTasks) -> dict:
+    aoi = await db.aois.find_one({"id": req.aoi_id}, {"_id": 0})
+    if not aoi:
+        raise HTTPException(404, "AOI not found")
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id, "aoi_id": req.aoi_id, "job_type": "TIMESERIES_CHANGE_DETECTION",
+        "status": "PENDING", "stage": "QUEUED", "progress": 0.0,
+        "input_parameters": req.model_dump(), "cdse_processing_units_used": 0,
+        "created_at": now_iso(),
+    }
+    await db.jobs.insert_one(dict(job))
+    background.add_task(_run_timeseries_job, job_id, req.aoi_id, req.use_sar, req.providers)
     job.pop("_id", None)
     return job
 
